@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// USERS & AUTHENTICATION
+// ============================================================
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  password      String
+  role          String   @default("confirmateur") // super_admin, manager, confirmateur, operateur_stock, boutique
+  phone         String?
+  avatar        String?
+  isActive      Boolean  @default(true)
+  shopId        String?  // si role = boutique
+  lastLoginAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  shop          Shop?               @relation(fields: [shopId], references: [id])
+  assignments   Assignment[]
+  reminders     Reminder[]
+  orderLogs     OrderLog[]
+  sessions      Session[]
+  assignedOrders Order[]             @relation("OrderAssignee")
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("sessions")
+}
+
+// ============================================================
+// BOUTIQUES (SHOPS)
+// ============================================================
+
+model Shop {
+  id              String   @id @default(cuid())
+  name            String
+  responsible     String
+  phone           String
+  email           String   @unique
+  address         String?
+  isActive        Boolean  @default(true)
+  apiKey          String   @unique @default(cuid())
+  ecotrackToken   String?  // chiffré en production
+  ecotrackUrl     String?
+  webhookUrl      String?
+  modeService     String   @default("confirmation_only") // confirmation_only, fulfillment_only, full_service
+  prixConfirmation Float   @default(0)
+  prixStockage    Float    @default(0)
+  prixEmballage   Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users           User[]
+  products        Product[]
+  orders          Order[]
+  invoices        Invoice[]
+  webhooks        Webhook[]
+  apiKeys         ApiKey[]
+  ecotrackLogs    EcotrackLog[]
+
+  @@map("shops")
+}
+
+// ============================================================
+// PRODUITS
+// ============================================================
+
+model Product {
+  id          String   @id @default(cuid())
+  shopId      String
+  name        String
+  sku         String?
+  barcode     String?
+  weight      Float?
+  fragile     Boolean  @default(false)
+  price       Float    @default(0)
+  stockTotal  Int      @default(0)
+  stockDispo  Int      @default(0)
+  stockReserve Int     @default(0)
+  stockExpedie Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  shop            Shop             @relation(fields: [shopId], references: [id])
+  stockMovements  StockMovement[]
+
+  @@unique([shopId, sku])
+  @@map("products")
+}
+
+// ============================================================
+// COMMANDES (ORDERS)
+// ============================================================
+
+model Order {
+  id              String   @id @default(cuid())
+  shopId          String
+  reference       String
+  nomClient       String
+  telephone       String
+  telephone2      String?
+  adresse         String?
+  wilaya          String?
+  commune         String?
+  produit         String
+  quantite        Int      @default(1)
+  montant         Float    @default(0)
+  typeLivraison   String   @default("domicile") // domicile, stop_desk
+  remarque        String?
+  statut          String   @default("nouvelle")
+  // Statuts: nouvelle, assignee, en_cours, confirmee, refusee, injoignable, rappel,
+  // doublon_suspect, annulee, en_preparation, emballée, prete_expedition,
+  // envoyee_ecotrack, erreur_ecotrack, rupture_stock
+
+  isRecurrent     Boolean  @default(false)
+  assignedTo      String?  // userId du confirmateur
+  confirmedAt     DateTime?
+  sentToEcotrackAt DateTime?
+  ecotrackTracking String?
+  ecotrackResponse String?
+  notes           String?  // notes internes
+  rappelDate      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  shop            Shop             @relation(fields: [shopId], references: [id])
+  assignee        User?            @relation("OrderAssignee", fields: [assignedTo], references: [id])
+  assignments     Assignment[]
+  orderLogs       OrderLog[]
+  reminders       Reminder[]
+  ecotrackLogs    EcotrackLog[]
+
+  @@unique([shopId, reference, telephone])
+  @@map("orders")
+}
+
+// ============================================================
+// LOGS COMMANDES
+// ============================================================
+
+model OrderLog {
+  id        String   @id @default(cuid())
+  orderId   String
+  userId    String?  // qui a fait l'action
+  action    String   // changement statut, note, assignation, etc.
+  details   String?
+  createdAt DateTime @default(now())
+
+  order     Order    @relation(fields: [orderId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@map("order_logs")
+}
+
+// ============================================================
+// MOUVEMENTS DE STOCK
+// ============================================================
+
+model StockMovement {
+  id          String   @id @default(cuid())
+  productId   String
+  type        String   // entree, sortie, retour, ajustement, reservation, expedition
+  quantite    Int
+  reference   String?  // référence commande ou motif
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  product     Product  @relation(fields: [productId], references: [id])
+
+  @@map("stock_movements")
+}
+
+// ============================================================
+// ASSIGNATIONS
+// ============================================================
+
+model Assignment {
+  id          String   @id @default(cuid())
+  orderId     String
+  userId      String   // confirmateur assigné
+  assignedBy  String?  // userId du manager/admin
+  type        String   @default("manuel") // manuel, automatique
+  createdAt   DateTime @default(now())
+
+  order       Order    @relation(fields: [orderId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("assignments")
+}
+
+// ============================================================
+// RAPPELS
+// ============================================================
+
+model Reminder {
+  id          String   @id @default(cuid())
+  orderId     String
+  userId      String   // confirmateur
+  dateRappel  DateTime
+  notes       String?
+  completed   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  order       Order    @relation(fields: [orderId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("reminders")
+}
+
+// ============================================================
+// LOGS ECOTRACK
+// ============================================================
+
+model EcotrackLog {
+  id          String   @id @default(cuid())
+  orderId     String
+  shopId      String
+  request     String?  // JSON de la requête
+  response    String?  // JSON de la réponse
+  status      String   // succes, erreur
+  error       String?
+  createdAt   DateTime @default(now())
+
+  order       Order    @relation(fields: [orderId], references: [id])
+  shop        Shop     @relation(fields: [shopId], references: [id])
+
+  @@map("ecotrack_logs")
+}
+
+// ============================================================
+// API KEYS
+// ============================================================
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  shopId      String
+  key         String   @unique
+  name        String?
+  isActive    Boolean  @default(true)
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  shop        Shop     @relation(fields: [shopId], references: [id])
+
+  @@map("api_keys")
+}
+
+// ============================================================
+// FACTURES
+// ============================================================
+
+model Invoice {
+  id              String   @id @default(cuid())
+  shopId          String
+  mois            String   // format YYYY-MM
+  nbConfirmees    Int      @default(0)
+  montantConfirm  Float    @default(0)
+  montantStockage Float    @default(0)
+  montantEmballage Float   @default(0)
+  montantTotal    Float    @default(0)
+  statut          String   @default("en_attente") // en_attente, payee, en_retard
+  pdfUrl          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  shop            Shop     @relation(fields: [shopId], references: [id])
+
+  @@map("invoices")
+}
+
+// ============================================================
+// WEBHOOKS
+// ============================================================
+
+model Webhook {
+  id          String   @id @default(cuid())
+  shopId      String
+  event       String   // confirmee, refusee, envoyee_ecotrack
+  url         String
+  isActive    Boolean  @default(true)
+  lastSentAt  DateTime?
+  lastStatus  String?
+  createdAt   DateTime @default(now())
+
+  shop        Shop     @relation(fields: [shopId], references: [id])
+
+  @@map("webhooks")
+}
