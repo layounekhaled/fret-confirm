@@ -93,6 +93,8 @@ const statusBadgeClasses: Record<string, string> = {
   prete_expedition: 'bg-lime-100 text-lime-700',
   envoyee_ecotrack: 'bg-green-800 text-white',
   erreur_ecotrack: 'bg-red-800 text-white',
+  envoyee_api_externe: 'bg-teal-800 text-white',
+  erreur_api_externe: 'bg-rose-800 text-white',
   rupture_stock: 'bg-amber-100 text-amber-700',
 }
 
@@ -101,7 +103,9 @@ const statusLabels: Record<string, string> = {
   confirmee: 'Confirmée', refusee: 'Refusée', injoignable: 'Injoignable',
   rappel: 'Rappel', doublon_suspect: 'Doublon', annulee: 'Annulée',
   en_preparation: 'En préparation', emballée: 'Emballée', prete_expedition: 'Prête expéd.',
-  envoyee_ecotrack: 'Envoyée', erreur_ecotrack: 'Erreur Eco.', rupture_stock: 'Rupture stock',
+  envoyee_ecotrack: 'Envoyée Eco.', erreur_ecotrack: 'Erreur Eco.',
+  envoyee_api_externe: 'Envoyée API', erreur_api_externe: 'Erreur API',
+  rupture_stock: 'Rupture stock',
 }
 
 interface OrderDetailProps {
@@ -310,8 +314,30 @@ export function OrderDetail({ orderId, token, userRole, onClose }: OrderDetailPr
               <div><span className="text-muted-foreground">Assigné à:</span><p className="font-medium">{order.assignee?.name || 'Non assigné'}</p></div>
               <div><span className="text-muted-foreground">Date:</span><p className="font-medium">{new Date(order.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p></div>
               {order.confirmedAt && <div><span className="text-muted-foreground">Confirmé le:</span><p className="font-medium">{new Date(order.confirmedAt).toLocaleDateString('fr-FR')}</p></div>}
-              {order.ecotrackTracking && <div><span className="text-muted-foreground">Suivi Ecotrack:</span><p className="font-medium">{order.ecotrackTracking}</p></div>}
             </div>
+
+            {/* Infos livraison / routage */}
+            {(order.deliveryProvider || order.ecotrackTracking || order.deliveryTracking) && (
+              <div className="p-3 rounded-lg bg-slate-50 border">
+                <p className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1"><Truck className="h-3.5 w-3.5" /> Informations livraison</p>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {order.deliveryProvider && (
+                    <div>
+                      <span className="text-muted-foreground">Prestataire:</span>
+                      <Badge className={`ml-1 border-0 text-xs ${order.deliveryProvider === 'ecotrack' ? 'bg-emerald-100 text-emerald-700' : 'bg-teal-100 text-teal-700'}`}>
+                        {order.deliveryProvider === 'ecotrack' ? 'Ecotrack' : 'API Externe'}
+                      </Badge>
+                    </div>
+                  )}
+                  {(order.deliveryTracking || order.ecotrackTracking) && (
+                    <div><span className="text-muted-foreground">N° suivi:</span><p className="font-medium">{order.deliveryTracking || order.ecotrackTracking}</p></div>
+                  )}
+                  {order.deliverySentAt && (
+                    <div><span className="text-muted-foreground">Envoyée le:</span><p className="font-medium">{new Date(order.deliverySentAt).toLocaleDateString('fr-FR')}</p></div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {order.remarque && (
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-100">

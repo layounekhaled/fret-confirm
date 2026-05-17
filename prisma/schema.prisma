@@ -60,13 +60,36 @@ model Shop {
   address         String?
   isActive        Boolean  @default(true)
   apiKey          String   @unique @default(cuid())
-  ecotrackToken   String?  // chiffré en production
-  ecotrackUrl     String?
-  webhookUrl      String?
+
+  // Mode de service
   modeService     String   @default("confirmation_only") // confirmation_only, fulfillment_only, full_service
+
+  // Prestataire de livraison
+  deliveryProvider String  @default("ecotrack") // ecotrack, custom_api
+  deliveryMode    String   @default("internal") // internal, external
+
+  // Configuration Ecotrack
+  ecotrackToken   String?
+  ecotrackUrl     String?
+
+  // Configuration API externe (si deliveryProvider = custom_api)
+  customApiUrl       String?
+  customApiMethod    String   @default("POST") // POST, GET
+  customApiHeaders   String?  // JSON des headers personnalisés
+  customApiBodyTemplate String? // JSON template dynamique avec {{field}}
+  customApiAuthType  String   @default("bearer") // bearer, api_key, none
+  customApiAuthToken String?  // token ou clé API
+  customApiMapping   String?  // JSON mapping des champs FRET → API externe
+
+  // Options
+  autoSendAfterConfirmation Boolean @default(true)
+  webhookUrl      String?
+
+  // Tarification
   prixConfirmation Float   @default(0)
   prixStockage    Float    @default(0)
   prixEmballage   Float    @default(0)
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -77,6 +100,7 @@ model Shop {
   webhooks        Webhook[]
   apiKeys         ApiKey[]
   ecotrackLogs    EcotrackLog[]
+  deliveryLogs    DeliveryLog[]
 
   @@map("shops")
 }
@@ -129,16 +153,24 @@ model Order {
   remarque        String?
   statut          String   @default("nouvelle")
   // Statuts: nouvelle, assignee, en_cours, confirmee, refusee, injoignable, rappel,
-  // doublon_suspect, annulee, en_preparation, emballée, prete_expedition,
-  // envoyee_ecotrack, erreur_ecotrack, rupture_stock
+  // doublon_suspect, annulee, en_preparation, emballee, prete_expedition,
+  // envoyee_ecotrack, erreur_ecotrack, envoyee_api_externe, erreur_api_externe,
+  // rupture_stock
 
   isRecurrent     Boolean  @default(false)
-  assignedTo      String?  // userId du confirmateur
+  assignedTo      String?
   confirmedAt     DateTime?
   sentToEcotrackAt DateTime?
   ecotrackTracking String?
   ecotrackResponse String?
-  notes           String?  // notes internes
+
+  // Infos routage livraison
+  deliveryProvider String?  // ecotrack, custom_api (rempli au moment de l'envoi)
+  deliverySentAt   DateTime?
+  deliveryTracking String?
+  deliveryResponse String?
+
+  notes           String?
   rappelDate      DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -149,6 +181,7 @@ model Order {
   orderLogs       OrderLog[]
   reminders       Reminder[]
   ecotrackLogs    EcotrackLog[]
+  deliveryLogs    DeliveryLog[]
 
   @@unique([shopId, reference, telephone])
   @@map("orders")
@@ -161,8 +194,8 @@ model Order {
 model OrderLog {
   id        String   @id @default(cuid())
   orderId   String
-  userId    String?  // qui a fait l'action
-  action    String   // changement statut, note, assignation, etc.
+  userId    String?
+  action    String
   details   String?
   createdAt DateTime @default(now())
 
@@ -181,7 +214,7 @@ model StockMovement {
   productId   String
   type        String   // entree, sortie, retour, ajustement, reservation, expedition
   quantite    Int
-  reference   String?  // référence commande ou motif
+  reference   String?
   notes       String?
   createdAt   DateTime @default(now())
 
@@ -197,8 +230,8 @@ model StockMovement {
 model Assignment {
   id          String   @id @default(cuid())
   orderId     String
-  userId      String   // confirmateur assigné
-  assignedBy  String?  // userId du manager/admin
+  userId      String
+  assignedBy  String?
   type        String   @default("manuel") // manuel, automatique
   createdAt   DateTime @default(now())
 
@@ -215,7 +248,7 @@ model Assignment {
 model Reminder {
   id          String   @id @default(cuid())
   orderId     String
-  userId      String   // confirmateur
+  userId      String
   dateRappel  DateTime
   notes       String?
   completed   Boolean  @default(false)
@@ -235,8 +268,8 @@ model EcotrackLog {
   id          String   @id @default(cuid())
   orderId     String
   shopId      String
-  request     String?  // JSON de la requête
-  response    String?  // JSON de la réponse
+  request     String?
+  response    String?
   status      String   // succes, erreur
   error       String?
   createdAt   DateTime @default(now())
@@ -245,6 +278,28 @@ model EcotrackLog {
   shop        Shop     @relation(fields: [shopId], references: [id])
 
   @@map("ecotrack_logs")
+}
+
+// ============================================================
+// LOGS LIVRAISON (MULTI-PRESTATAIRE)
+// ============================================================
+
+model DeliveryLog {
+  id              String   @id @default(cuid())
+  orderId         String
+  shopId          String
+  provider        String   // ecotrack, custom
+  requestPayload  String?  // JSON de la requête envoyée
+  responsePayload String?  // JSON de la réponse reçue
+  status          String   // success, error
+  errorMessage    String?
+  retryCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  order           Order    @relation(fields: [orderId], references: [id])
+  shop            Shop     @relation(fields: [shopId], references: [id])
+
+  @@map("delivery_logs")
 }
 
 // ============================================================
@@ -272,13 +327,13 @@ model ApiKey {
 model Invoice {
   id              String   @id @default(cuid())
   shopId          String
-  mois            String   // format YYYY-MM
+  mois            String
   nbConfirmees    Int      @default(0)
   montantConfirm  Float    @default(0)
   montantStockage Float    @default(0)
   montantEmballage Float   @default(0)
   montantTotal    Float    @default(0)
-  statut          String   @default("en_attente") // en_attente, payee, en_retard
+  statut          String   @default("en_attente")
   pdfUrl          String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -295,7 +350,7 @@ model Invoice {
 model Webhook {
   id          String   @id @default(cuid())
   shopId      String
-  event       String   // confirmee, refusee, envoyee_ecotrack
+  event       String
   url         String
   isActive    Boolean  @default(true)
   lastSentAt  DateTime?

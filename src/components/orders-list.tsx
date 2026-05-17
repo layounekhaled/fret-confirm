@@ -47,6 +47,8 @@ const statusBadgeClasses: Record<string, string> = {
   prete_expedition: 'bg-lime-100 text-lime-700',
   envoyee_ecotrack: 'bg-green-800 text-white',
   erreur_ecotrack: 'bg-red-800 text-white',
+  envoyee_api_externe: 'bg-teal-800 text-white',
+  erreur_api_externe: 'bg-rose-800 text-white',
   rupture_stock: 'bg-amber-100 text-amber-700',
 }
 
@@ -55,7 +57,9 @@ const statusLabels: Record<string, string> = {
   confirmee: 'Confirmée', refusee: 'Refusée', injoignable: 'Injoignable',
   rappel: 'Rappel', doublon_suspect: 'Doublon', annulee: 'Annulée',
   en_preparation: 'En préparation', emballée: 'Emballée', prete_expedition: 'Prête expéd.',
-  envoyee_ecotrack: 'Envoyée', erreur_ecotrack: 'Erreur Eco.', rupture_stock: 'Rupture stock',
+  envoyee_ecotrack: 'Envoyée Eco.', erreur_ecotrack: 'Erreur Eco.',
+  envoyee_api_externe: 'Envoyée API', erreur_api_externe: 'Erreur API',
+  rupture_stock: 'Rupture stock',
 }
 
 export function OrdersList({ token, userRole, onSelectOrder }: OrdersListProps) {

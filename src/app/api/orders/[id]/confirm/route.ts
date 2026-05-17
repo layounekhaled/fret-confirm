@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
-import { sendOrderToEcotrack } from '@/lib/ecotrack'
+import { routeOrder } from '@/lib/delivery-router'
 import { reserveStock } from '@/lib/stock'
 import { sendWebhook } from '@/lib/webhooks'
 
@@ -15,7 +15,6 @@ export async function POST(
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
     }
 
-    // Seuls les confirmateurs et managers peuvent confirmer
     if (!['confirmateur', 'manager', 'super_admin'].includes(payload.role)) {
       return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
     }
@@ -62,13 +61,78 @@ export async function POST(
     let additionalInfo = ''
 
     if (shop.modeService === 'confirmation_only') {
-      // Envoyer directement à Ecotrack
-      const ecotrackResult = await sendOrderToEcotrack(id)
-      additionalInfo = ecotrackResult.success
-        ? ' - Envoyée à Ecotrack'
-        : ` - Erreur Ecotrack: ${ecotrackResult.error}`
-    } else if (shop.modeService === 'fulfillment_only' || shop.modeService === 'full_service') {
-      // Chercher le produit dans le stock
+      // ============================================================
+      // CAS 1 : confirmation_only
+      // Après confirmation → envoyer automatiquement vers le prestataire configuré
+      // ============================================================
+      if (shop.autoSendAfterConfirmation) {
+        const routeResult = await routeOrder(id)
+        additionalInfo = routeResult.success
+          ? ` - Envoyée vers ${routeResult.provider}${routeResult.tracking ? ` (suivi: ${routeResult.tracking})` : ''}`
+          : ` - Erreur envoi (${routeResult.provider}): ${routeResult.error}`
+      } else {
+        additionalInfo = ' - En attente d\'envoi manuel'
+      }
+    } else if (shop.modeService === 'fulfillment_only') {
+      // ============================================================
+      // CAS 2 : fulfillment_only
+      // Pas de confirmation nécessaire, directement en préparation
+      // (Mais on a quand même confirmé ci-dessus, donc on gère le stock)
+      // ============================================================
+      const product = await db.product.findFirst({
+        where: {
+          shopId: shop.id,
+          name: { contains: order.produit },
+        },
+      })
+
+      if (product) {
+        const reserved = await reserveStock(product.id, order.quantite)
+        if (reserved) {
+          await db.order.update({
+            where: { id },
+            data: { statut: 'en_preparation' },
+          })
+          await db.orderLog.create({
+            data: {
+              orderId: id,
+              userId: payload.userId,
+              action: 'mise_en_preparation',
+              details: `Stock réservé pour ${product.name}. Mise en préparation.`,
+            },
+          })
+          additionalInfo = ' - Mise en préparation (stock réservé)'
+        } else {
+          await db.order.update({
+            where: { id },
+            data: { statut: 'rupture_stock' },
+          })
+          await db.orderLog.create({
+            data: {
+              orderId: id,
+              userId: payload.userId,
+              action: 'rupture_stock',
+              details: `Stock insuffisant pour ${product.name}`,
+            },
+          })
+          additionalInfo = ' - Rupture de stock'
+        }
+      } else {
+        await db.orderLog.create({
+          data: {
+            orderId: id,
+            userId: payload.userId,
+            action: 'produit_non_trouve',
+            details: `Produit "${order.produit}" non trouvé dans le catalogue`,
+          },
+        })
+        additionalInfo = ' - Produit non trouvé dans le catalogue'
+      }
+    } else if (shop.modeService === 'full_service') {
+      // ============================================================
+      // CAS 3 : full_service
+      // Après confirmation → vérifier stock → préparation → envoi
+      // ============================================================
       const product = await db.product.findFirst({
         where: {
           shopId: shop.id,
@@ -89,18 +153,11 @@ export async function POST(
               orderId: id,
               userId: payload.userId,
               action: 'mise_en_preparation',
-              details: `Stock réservé pour le produit ${product.name}. Mise en préparation.`,
+              details: `Stock réservé pour ${product.name}. Mise en préparation.`,
             },
           })
           additionalInfo = ' - Mise en préparation (stock réservé)'
-
-          // Si full_service, aussi envoyer à Ecotrack
-          if (shop.modeService === 'full_service') {
-            const ecotrackResult = await sendOrderToEcotrack(id)
-            additionalInfo += ecotrackResult.success
-              ? ' + Envoyée à Ecotrack'
-              : ` + Erreur Ecotrack: ${ecotrackResult.error}`
-          }
+          // L'envoi vers le prestataire se fera après emballage
         } else {
           // Pas de stock disponible
           await db.order.update({
@@ -112,26 +169,28 @@ export async function POST(
               orderId: id,
               userId: payload.userId,
               action: 'rupture_stock',
-              details: `Stock insuffisant pour le produit ${product.name}`,
+              details: `Stock insuffisant pour ${product.name}`,
             },
           })
           additionalInfo = ' - Rupture de stock'
         }
       } else {
-        // Produit non trouvé dans le catalogue
+        // Produit non trouvé - si autoSendAfterConfirmation, envoyer directement
         await db.orderLog.create({
           data: {
             orderId: id,
             userId: payload.userId,
             action: 'produit_non_trouve',
-            details: `Produit "${order.produit}" non trouvé dans le catalogue de la boutique`,
+            details: `Produit "${order.produit}" non trouvé dans le catalogue`,
           },
         })
-        additionalInfo = ' - Produit non trouvé dans le catalogue'
+        additionalInfo = ' - Produit non trouvé'
 
-        // Si full_service, envoyer à Ecotrack quand même
-        if (shop.modeService === 'full_service') {
-          await sendOrderToEcotrack(id)
+        if (shop.autoSendAfterConfirmation) {
+          const routeResult = await routeOrder(id)
+          additionalInfo += routeResult.success
+            ? ` - Envoyée vers ${routeResult.provider}`
+            : ` - Erreur envoi: ${routeResult.error}`
         }
       }
     }
@@ -146,7 +205,7 @@ export async function POST(
     const updatedOrder = await db.order.findUnique({
       where: { id },
       include: {
-        shop: { select: { id: true, name: true, modeService: true } },
+        shop: { select: { id: true, name: true, modeService: true, deliveryProvider: true, deliveryMode: true } },
         assignee: { select: { id: true, name: true } },
       },
     })

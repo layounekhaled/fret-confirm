@@ -8,6 +8,7 @@ async function main() {
   console.log('🌱 Début du seeding...')
 
   // Nettoyer la base
+  await prisma.deliveryLog.deleteMany()
   await prisma.ecotrackLog.deleteMany()
   await prisma.stockMovement.deleteMany()
   await prisma.orderLog.deleteMany()
@@ -100,6 +101,9 @@ async function main() {
       ecotrackToken: 'test_token_techdz',
       ecotrackUrl: 'https://ecotrack.example.com/api/orders',
       modeService: 'full_service',
+      deliveryProvider: 'ecotrack',
+      deliveryMode: 'internal',
+      autoSendAfterConfirmation: true,
       prixConfirmation: 150,
       prixStockage: 50,
       prixEmballage: 75,
@@ -118,6 +122,9 @@ async function main() {
       ecotrackToken: 'test_token_modealgerie',
       ecotrackUrl: 'https://ecotrack.example.com/api/orders',
       modeService: 'confirmation_only',
+      deliveryProvider: 'ecotrack',
+      deliveryMode: 'internal',
+      autoSendAfterConfirmation: true,
       prixConfirmation: 200,
       prixStockage: 0,
       prixEmballage: 0,
@@ -133,9 +140,17 @@ async function main() {
       address: 'Zone industrielle, Blida',
       isActive: true,
       apiKey: `fret_${uuidv4().replace(/-/g, '')}`,
-      ecotrackToken: 'test_token_dzmarket',
-      ecotrackUrl: 'https://ecotrack.example.com/api/orders',
       modeService: 'fulfillment_only',
+      deliveryProvider: 'custom_api',
+      deliveryMode: 'external',
+      customApiUrl: 'https://api.yalidine.app/v1/orders',
+      customApiMethod: 'POST',
+      customApiHeaders: '{"X-Api-Key": "test_yalidine_key"}',
+      customApiBodyTemplate: '{"order_ref": "{{reference}}", "client_name": "{{nom_client}}", "phone": "{{telephone}}", "address": "{{adresse}}", "wilaya": "{{wilaya}}", "commune": "{{commune}}", "product": "{{produit}}", "quantity": {{quantite}}, "price": {{montant}}}',
+      customApiAuthType: 'api_key',
+      customApiAuthToken: 'test_yalidine_api_key',
+      customApiMapping: null,
+      autoSendAfterConfirmation: true,
       prixConfirmation: 0,
       prixStockage: 100,
       prixEmballage: 125,

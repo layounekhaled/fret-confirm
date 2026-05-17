@@ -23,37 +23,25 @@ export async function GET(request: NextRequest) {
       topShops,
       topAgents,
       ordersLast7Days,
+      deliveryStats,
     ] = await Promise.all([
-      // Total commandes
       db.order.count(),
-
-      // Commandes par statut
       db.order.groupBy({
         by: ['statut'],
         _count: { statut: true },
       }),
-
-      // Commandes confirmées (pour taux)
       db.order.count({ where: { statut: 'confirmee' } }),
-
-      // CA confirmé
       db.order.aggregate({
         _sum: { montant: true },
         where: { statut: 'confirmee' },
       }),
-
-      // Erreurs Ecotrack
       db.order.count({ where: { statut: 'erreur_ecotrack' } }),
-
-      // Top boutiques
       db.order.groupBy({
         by: ['shopId'],
         _count: { shopId: true },
         orderBy: { _count: { shopId: 'desc' } },
         take: 5,
       }),
-
-      // Top agents (confirmateurs)
       db.order.groupBy({
         by: ['assignedTo'],
         _count: { assignedTo: true },
@@ -61,9 +49,8 @@ export async function GET(request: NextRequest) {
         orderBy: { _count: { assignedTo: 'desc' } },
         take: 5,
       }),
-
-      // Commandes 7 derniers jours
       getOrdersLast7Days(),
+      getDeliveryStats(),
     ])
 
     // Enrichir top boutiques
@@ -73,11 +60,7 @@ export async function GET(request: NextRequest) {
           where: { id: s.shopId },
           select: { name: true },
         })
-        return {
-          shopId: s.shopId,
-          name: shop?.name || 'Inconnu',
-          count: s._count.shopId,
-        }
+        return { shopId: s.shopId, name: shop?.name || 'Inconnu', count: s._count.shopId }
       })
     )
 
@@ -88,11 +71,7 @@ export async function GET(request: NextRequest) {
           where: { id: a.assignedTo! },
           select: { name: true },
         })
-        return {
-          userId: a.assignedTo,
-          name: user?.name || 'Inconnu',
-          count: a._count.assignedTo,
-        }
+        return { userId: a.assignedTo, name: user?.name || 'Inconnu', count: a._count.assignedTo }
       })
     )
 
@@ -100,7 +79,6 @@ export async function GET(request: NextRequest) {
       ? Math.round((confirmedOrders / totalOrders) * 100)
       : 0
 
-    // Formater les statuts
     const statusMap: Record<string, number> = {}
     for (const s of ordersByStatus) {
       statusMap[s.statut] = s._count.statut
@@ -115,6 +93,7 @@ export async function GET(request: NextRequest) {
       topShops: topShopsWithNames,
       topAgents: topAgentsWithNames,
       ordersLast7Days,
+      deliveryStats,
     })
   } catch (error) {
     console.error('Erreur dashboard admin:', error)
@@ -134,10 +113,41 @@ async function getOrdersLast7Days() {
       where: { createdAt: { gte: start, lte: end } },
     })
 
-    days.push({
-      date: start.toISOString().split('T')[0],
-      count,
-    })
+    days.push({ date: start.toISOString().split('T')[0], count })
   }
   return days
+}
+
+async function getDeliveryStats() {
+  const [
+    ecotrackSent,
+    customApiSent,
+    apiErrors,
+    providerByShop,
+  ] = await Promise.all([
+    db.order.count({ where: { deliveryProvider: 'ecotrack', statut: { in: ['envoyee_ecotrack', 'erreur_ecotrack'] } } }),
+    db.order.count({ where: { deliveryProvider: 'custom', statut: { in: ['envoyee_api_externe', 'erreur_api_externe'] } } }),
+    db.order.count({ where: { statut: { in: ['erreur_ecotrack', 'erreur_api_externe'] } } }),
+    db.shop.groupBy({
+      by: ['deliveryProvider'],
+      _count: { deliveryProvider: true },
+    }),
+  ])
+
+  const totalSent = ecotrackSent + customApiSent
+  const errorRate = totalSent > 0 ? Math.round((apiErrors / totalSent) * 100) : 0
+
+  const providerDistribution: Record<string, number> = {}
+  for (const p of providerByShop) {
+    providerDistribution[p.deliveryProvider] = p._count.deliveryProvider
+  }
+
+  return {
+    ecotrackSent,
+    customApiSent,
+    totalSent,
+    apiErrors,
+    errorRate,
+    providerDistribution,
+  }
 }

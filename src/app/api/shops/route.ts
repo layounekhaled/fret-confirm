@@ -42,18 +42,14 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const {
-      name,
-      responsible,
-      phone,
-      email,
-      address,
-      modeService,
-      prixConfirmation,
-      prixStockage,
-      prixEmballage,
-      ecotrackToken,
-      ecotrackUrl,
-      webhookUrl,
+      name, responsible, phone, email, address,
+      modeService, prixConfirmation, prixStockage, prixEmballage,
+      ecotrackToken, ecotrackUrl, webhookUrl,
+      // Nouveaux champs routage
+      deliveryProvider, deliveryMode,
+      customApiUrl, customApiMethod, customApiHeaders,
+      customApiBodyTemplate, customApiAuthType, customApiAuthToken,
+      customApiMapping, autoSendAfterConfirmation,
     } = body
 
     if (!name || !responsible || !phone || !email) {
@@ -63,23 +59,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Vérifier l'unicité de l'email
     const existing = await db.shop.findUnique({ where: { email } })
     if (existing) {
-      return NextResponse.json(
-        { error: 'Email déjà utilisé' },
-        { status: 409 }
-      )
+      return NextResponse.json({ error: 'Email déjà utilisé' }, { status: 409 })
     }
 
     const apiKey = `fret_${uuidv4().replace(/-/g, '')}`
 
     const shop = await db.shop.create({
       data: {
-        name,
-        responsible,
-        phone,
-        email,
+        name, responsible, phone, email,
         address: address || null,
         modeService: modeService || 'confirmation_only',
         prixConfirmation: Number(prixConfirmation) || 0,
@@ -89,6 +78,17 @@ export async function POST(request: NextRequest) {
         ecotrackUrl: ecotrackUrl || null,
         webhookUrl: webhookUrl || null,
         apiKey,
+        // Nouveaux champs routage
+        deliveryProvider: deliveryProvider || 'ecotrack',
+        deliveryMode: deliveryMode || 'internal',
+        customApiUrl: customApiUrl || null,
+        customApiMethod: customApiMethod || 'POST',
+        customApiHeaders: customApiHeaders || null,
+        customApiBodyTemplate: customApiBodyTemplate || null,
+        customApiAuthType: customApiAuthType || 'bearer',
+        customApiAuthToken: customApiAuthToken || null,
+        customApiMapping: customApiMapping || null,
+        autoSendAfterConfirmation: autoSendAfterConfirmation !== undefined ? autoSendAfterConfirmation : true,
       },
     })
 

@@ -48,7 +48,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
     }
 
-    if (!['super_admin', 'manager'].includes(payload.role)) {
+    if (!['super_admin', 'manager'].includes(payload.role) && payload.role !== 'boutique') {
       return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
     }
 
@@ -60,15 +60,38 @@ export async function PUT(
       return NextResponse.json({ error: 'Boutique introuvable' }, { status: 404 })
     }
 
+    // Vérifier qu'une boutique ne peut modifier que sa propre config
+    if (payload.role === 'boutique' && payload.shopId !== id) {
+      return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+    }
+
     const updateData: Record<string, unknown> = {}
     const allowedFields = [
+      // Champs de base
       'name', 'responsible', 'phone', 'address',
       'modeService', 'prixConfirmation', 'prixStockage', 'prixEmballage',
+      // Champs Ecotrack
       'ecotrackToken', 'ecotrackUrl', 'webhookUrl',
+      // Nouveaux champs routage livraison
+      'deliveryProvider', 'deliveryMode',
+      'customApiUrl', 'customApiMethod', 'customApiHeaders',
+      'customApiBodyTemplate', 'customApiAuthType', 'customApiAuthToken',
+      'customApiMapping', 'autoSendAfterConfirmation',
     ]
 
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
+        // Pour les champs JSON, valider que c'est du JSON valide
+        if (['customApiHeaders', 'customApiBodyTemplate', 'customApiMapping'].includes(field) && body[field]) {
+          try {
+            JSON.parse(body[field])
+          } catch {
+            return NextResponse.json(
+              { error: `Champ ${field} : JSON invalide` },
+              { status: 400 }
+            )
+          }
+        }
         updateData[field] = body[field]
       }
     }

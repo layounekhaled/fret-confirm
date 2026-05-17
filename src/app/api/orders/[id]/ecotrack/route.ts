@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
-import { retryEcotrack } from '@/lib/ecotrack'
+import { routeOrder, retryDelivery } from '@/lib/delivery-router'
 
 export async function POST(
   request: NextRequest,
@@ -12,30 +12,36 @@ export async function POST(
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
     }
 
-    if (!['manager', 'super_admin', 'confirmateur'].includes(payload.role)) {
+    if (!['manager', 'super_admin', 'confirmateur', 'operateur_stock'].includes(payload.role)) {
       return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
     }
 
     const { id } = await params
 
-    const result = await retryEcotrack(id)
+    // Vérifier si c'est un retry ou un envoi initial
+    const body = await request.json().catch(() => ({}))
+    const isRetry = body.retry === true
+
+    const result = isRetry ? await retryDelivery(id) : await routeOrder(id)
 
     if (result.success) {
       return NextResponse.json({
-        message: 'Commande envoyée à Ecotrack avec succès',
+        message: `Commande envoyée vers ${result.provider} avec succès`,
         tracking: result.tracking,
+        provider: result.provider,
       })
     } else {
       return NextResponse.json(
         {
-          error: 'Erreur lors de l\'envoi à Ecotrack',
+          error: `Erreur lors de l'envoi vers ${result.provider}`,
           details: result.error,
+          provider: result.provider,
         },
         { status: 400 }
       )
     }
   } catch (error) {
-    console.error('Erreur ecotrack retry:', error)
+    console.error('Erreur livraison:', error)
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
   }
 }
