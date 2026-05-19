@@ -17,13 +17,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
     }
 
+    // Check if force reset is requested
+    const body = await request.json().catch(() => ({}))
+    const forceReset = body.force === true || body.reset === true
+
     // Check if database is already seeded
     const userCount = await db.user.count()
-    if (userCount > 0) {
+    if (userCount > 0 && !forceReset) {
       return NextResponse.json({ 
-        message: 'Base de données déjà initialisée',
+        message: 'Base de données déjà initialisée. Envoyez {"force": true} pour réinitialiser.',
         userCount 
       })
+    }
+
+    // Clean all data if force reset or fresh database
+    if (userCount > 0 && forceReset) {
+      await db.deliveryLog.deleteMany()
+      await db.ecotrackLog.deleteMany()
+      await db.stockMovement.deleteMany()
+      await db.orderLog.deleteMany()
+      await db.assignment.deleteMany()
+      await db.reminder.deleteMany()
+      await db.invoice.deleteMany()
+      await db.order.deleteMany()
+      await db.apiKey.deleteMany()
+      await db.webhook.deleteMany()
+      await db.product.deleteMany()
+      await db.session.deleteMany()
+      await db.user.deleteMany()
+      await db.shop.deleteMany()
     }
 
     const hashPassword = (pw: string) => hashSync(pw, 12)
