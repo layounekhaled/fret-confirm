@@ -69,3 +69,4 @@ worklog.md
 
 # Mini services
 /mini-services/
+.env*.local
